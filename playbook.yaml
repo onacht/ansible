@@ -1,0 +1,109 @@
+-
+  name: config db server
+  hosts: db
+  tasks:
+    - name: install firewalld on db server
+      yum:
+        name: firewalld
+        state: present
+    - name: start and enable firewalld
+      service:
+        name: firewalld
+        state: started
+        enabled: yes
+    - name: install mariadb on db server
+      yum:
+        name: mariadb-server
+        state: present
+    - name: start aand enable mariadb
+      service:
+        name: mariadb
+        state: started
+        enabled: yes
+    - name: configure firewalld ports
+      firewalld:
+        zone: public
+        port: 3306/tcp
+        permanent: yes
+        state: enabled
+    - name: reload service firewalld
+      systemd:
+        name: firewalld
+        state: reloaded
+    - name: 'installing python-3 mysql libraries'
+      yum: 
+        name: MySQL-python
+        state: present
+    - name: Create a new database with name 'ecomdb'
+      mysql_db:
+        name: ecomdb
+        state: present
+    - name: Create database user with password and all database privileges and 'WITH GRANT OPTION'
+      mysql_user:
+        name: ecomuser
+        password: ecompassword
+        priv: '*.*:ALL,GRANT'
+        state: present
+    - name: Reload privilege tables
+      command: 'mysql -ne "{{ item }}"'
+      with_items:
+        - FLUSH PRIVILEGES
+      changed_when: False
+    - name: Creating a file with content
+      copy:
+        dest: /home/db-load-script.sql
+        content: |
+          USE ecomdb;
+          CREATE TABLE products (id mediumint(8) unsigned NOT NULL auto_increment,Name varchar(255) default NULL,Price varchar(255) default NULL, ImageUrl varchar(255) default NULL,PRIMARY KEY (id)) AUTO_INCREMENT=1;
+
+          INSERT INTO products (Name,Price,ImageUrl) VALUES ("Laptop","100","c-1.png"),("Drone","200","c-2.png"),("VR","300","c-3.png"),("Tablet","50","c-5.png"),("Watch","90","c-6.png"),("Phone Covers","20","c-7.png"),("Phone","80","c-8.png"),("Laptop","150","c-4.png");
+        remote_src: yes
+    - name: import db dump
+      mysql_db:
+        state: present
+        name: ecomdb
+        login_user: 'ecomuser'
+        login_password: 'ecompassword'
+        target: /home/db-load-script.sql
+-
+  name: config webserver
+  hosts: web
+  tasks:
+    - name: configure firewalld ports
+      firewalld:
+        zone: public
+        port: 80/tcp
+        permanent: yes
+        state: enabled
+    - name: reload service firewalld
+      systemd:
+        name: firewalld
+        state: reloaded
+    - name: install packages
+      loop:
+      - httpd
+      - php
+      - php-mysql
+      yum:
+        name: '{{ item }}'
+        state: present 
+    - name: Change DirectoryIndex index.html to DirectoryIndex index.php to make the php page the default page
+      command: sed -i 's/index.html/index.php/g' /etc/httpd/conf/httpd.conf
+    - name: start and enable httpd
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+    - name: Download git
+      yum:
+        name: git
+        state: present
+    - name: 'check if git clone exist'
+      stat:
+        path: /var/www/html/README.md
+      register: git_exists
+    - name: Download code
+      command: git clone https://github.com/kodekloudhub/learning-app-ecommerce.git /var/www/html/
+      when: git_exists.stat.exists == False
+    - name: Update index.php file to connect to the right database server
+      command: sed -i 's/172.20.1.101/192.168.1.138/g' /var/www/html/index.php

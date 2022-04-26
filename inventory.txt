@@ -1,0 +1,2 @@
+db ansible_host=dockerserver
+web ansible_host=target2
